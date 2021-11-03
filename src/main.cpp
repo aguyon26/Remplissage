@@ -2,7 +2,6 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncElegantOTA.h>
-//#include <SPIFFS.h>
 #define _ESPASYNC_WIFIMGR_LOGLEVEL_    3
 #include <WiFiClient.h>
 #include <ESPmDNS.h>
@@ -207,7 +206,6 @@ void setup()
               sensorPres = float (map(float (analogRead(capteurPression)), 0.0,7500.0 ,0.0, 500.0))/100.0;
               String Value = String(sensorPres);
               request->send(200, "text/plain", Value);
-
             });
  server.on("/lectureValeur2", HTTP_GET, [](AsyncWebServerRequest *request)
             {
