@@ -27,22 +27,33 @@ DNSServer dnsServer;
 //const char *ssid = "";
 //const char *password = "";
 
-const int led = 02;
+const int led = 02; // AN0 UNO
 const int resetButton =18; //D13 UNO
-const int capteurPression = 35;
-const int capteurTop = 26;   
+const int capteurPression = 35; // AN2 UNO
+const int capteurTop = 26;   // D2 UNO
+
+const int relay1Beer = 12;
+bool etatRelay1BeerVoulu =0;
+const int relay2Gaz  = 13;
+bool etatRelay2GazVoulu =0;
+const int relay3     = 5;
+bool etatRelay3Voulu =0;
+const int relay4Pump = 23;
+bool etatrelay4PumpVoulu =0;
 
 int state;
 String stateInfo;
 int valPres;
+
 int deltaPres;
 int timePres;
 int cntRemplissage;
 float sensorPres;
+float valPresP0;
 
 int valeurDelayLed = 1000;
-bool etatLed = 0;
-bool etatLedVoulu = 0;
+//bool etatLed = 0;
+bool etatVoulu = 0;
 int previousMillis = 0;
 
 AsyncWebServer server(80);
@@ -55,6 +66,22 @@ void IRAM_ATTR isr() {
  CountInput = CountInput+1; // Formule de calcul:F(Hz)= 109 * débit (Q)(l/min)
 }
 
+//----------------------------------------------------Millis
+unsigned long long superMillis() {
+  static unsigned long nbRollover = 0;
+  static unsigned long previousMillis = 0;
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis < previousMillis) {
+     nbRollover++;
+  }
+  previousMillis = currentMillis;
+
+  unsigned long long finalMillis = nbRollover;
+  finalMillis <<= 32;
+  finalMillis +=  currentMillis;
+  return finalMillis;
+}
 
 
 void setup()
@@ -65,6 +92,10 @@ void setup()
   Serial.println("\n");
   //----------------------------------------------------GPIO
   pinMode(led, OUTPUT);
+  pinMode(relay1Beer, OUTPUT);
+  pinMode(relay2Gaz, OUTPUT);
+  pinMode(relay3, OUTPUT);
+  pinMode(relay4Pump, OUTPUT);
   pinMode(resetButton,INPUT_PULLUP);
   pinMode(capteurTop, INPUT_PULLDOWN);
 
@@ -214,15 +245,25 @@ void setup()
             });
   server.on("/on", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-              etatLedVoulu = 1;
+              etatVoulu = 1;
               request->send(204);
             });
 
   server.on("/off", HTTP_GET, [](AsyncWebServerRequest *request)
             {
-              etatLedVoulu = 0;
-              digitalWrite(led, LOW);
-              etatLed = 0;
+              etatVoulu = 0;
+              
+              request->send(204);
+            });
+  server.on("/on1", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              etatrelay4PumpVoulu = 1;
+              request->send(204);
+            });
+
+  server.on("/off1", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              etatrelay4PumpVoulu = 0;
               request->send(204);
             });
 
@@ -293,38 +334,120 @@ void setup()
 
 void loop()
 {
- 
  ArduinoOTA.handle();
-   if(etatLedVoulu)
+ unsigned long currentMillis = superMillis();
+
+   if(etatVoulu)
   {
-    unsigned long currentMillis = millis();
-    if(currentMillis - previousMillis >= valeurDelayLed)
-    {
-      previousMillis = currentMillis;
-
-      etatLed = !etatLed;
-      digitalWrite(led, etatLed);
-    }
-
       switch (state)
       {
       case 0 : /* E0 : Purge manuel  */
         stateInfo = "Purge manuel de la bouteille";
-        if( sensorPres > float(valPres)  )
+        etatRelay1BeerVoulu =0;
+        etatRelay2GazVoulu =0;
+        if( sensorPres > float(valPres))
         {
-
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =0;
+            etatRelay2GazVoulu =0;
+            CountInput =0;       
+            state = 10;
+            valPresP0  = sensorPres; 
         }
-        /* code */
-        break;
+      break;
+
+      case 10 : /* E10 : Purge gaz C02  */
+        stateInfo = "Purge gaz C02 1,5 secondes";
+        etatRelay1BeerVoulu =0;
+        etatRelay2GazVoulu =1;
+        if( sensorPres < float(valPres) && (currentMillis-previousMillis)>=1500)
+        {
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =0;
+            etatRelay2GazVoulu =0;
+            CountInput =0;
+            state = 20;
+        }
+      break;
+
+      case 20 : /* E20 : Attentente retour Pression Purge P0 */
+        stateInfo = "Attentente retour Pression Purge P0";
+        etatRelay1BeerVoulu =0;
+        etatRelay2GazVoulu =0;
+        if( sensorPres > valPresP0 && (currentMillis-previousMillis)>=1500)
+        {
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =0;
+            etatRelay2GazVoulu =0;
+            state = 30;
+            CountInput =0;
+        }
+      break;
+
+      case 30 : /* E30 : Passage manuel Ligquide */
+        stateInfo = "Passage manuel Ligquide";
+        etatRelay1BeerVoulu =1;
+        etatRelay2GazVoulu =0;
+        if(0 <= CountInput && sensorPres > float(valPres+deltaPres) && (currentMillis-previousMillis)>=1500)
+        {
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =1;
+            etatRelay2GazVoulu =0;
+            state = 40;
+        }
+      break;
+
+      case 40 : /* E40 : Pression stable + Ligquide */
+        stateInfo = "Pression stable + Ligquide ";
+        etatRelay1BeerVoulu =1;
+        etatRelay2GazVoulu =0;
+        if(0 <= cntRemplissage && sensorPres > float(valPres+deltaPres) && (currentMillis-previousMillis)>=timePres)
+        {
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =1;
+            etatRelay2GazVoulu =0;
+            state = 50;
+        }
+      break;
+
+      case 50 : /* E50 : Ouverture Vanne Purge */
+        stateInfo = "Ouverture Vanne Purge";
+        etatRelay1BeerVoulu =1;
+        etatRelay2GazVoulu =1;
+        if(CountInput>= cntRemplissage)
+        {
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =0;
+            etatRelay2GazVoulu =0;
+            state = 60;
+        }
+      break;
+
+      case 60 : /* E60 : Ouverture Vanne Purge */
+        stateInfo = "Ouverture Vanne Purge";
+        etatRelay1BeerVoulu =0;
+        etatRelay2GazVoulu =1;
+        if(sensorPres < float(5) && (currentMillis-previousMillis)>=1500)
+        {
+            previousMillis = currentMillis; 
+            etatRelay1BeerVoulu =0;
+            etatRelay2GazVoulu =1;
+            state = 00;
+        }
+      break;
 
       default:
         break;
 
-
       }
+  }else
+      state = 0;
 
-  }
-
+  digitalWrite(led, etatVoulu);
+  digitalWrite(relay1Beer,etatRelay1BeerVoulu);
+  digitalWrite(relay2Gaz,etatRelay2GazVoulu);
+  digitalWrite(relay3,etatRelay3Voulu);
+  digitalWrite(relay4Pump,etatrelay4PumpVoulu);
 /*
 Gestion de la pression.
 ETAPE : 0 "Purge manuel de la boueille" #DMD => OUVRIR GAZ PURGE
@@ -344,8 +467,18 @@ T50 : "true"
 
 RETOUR a l'étape"0"
 
+
+
+    unsigned long currentMillis = millis();
+    if(currentMillis - previousMillis >= valeurDelayLed)
+    {
+      previousMillis = currentMillis;
+
+      etatLed = !etatLed;
+      digitalWrite(led, etatLed);
+    }
 */
 
 }
 
- 
+

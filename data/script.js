@@ -141,3 +141,18 @@ function offButton() {
     xhttp.open("GET", "off", true);
     xhttp.send();
 }
+function onButton1() {
+    var xhttp = new XMLHttpRequest();
+    document.getElementById("ON1").innerText = "ON..";
+    document.getElementById("OFF1").innerText = "OFF";
+
+    xhttp.open("GET", "on1", true);
+    xhttp.send();
+}
+function offButton1() {
+    var xhttp = new XMLHttpRequest();
+    document.getElementById("ON1").innerText = "ON";
+    document.getElementById("OFF1").innerText = "OFF..";
+    xhttp.open("GET", "off1", true);
+    xhttp.send();
+}
